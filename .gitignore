@@ -2,3 +2,4 @@
 *.o
 *.out
 cscope.out
+.gdb_history
