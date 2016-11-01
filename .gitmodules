@@ -1,0 +1,3 @@
+[submodule "neat"]
+	path = neat
+	url = https://github.com/neat-project/neat
