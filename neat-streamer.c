@@ -33,6 +33,20 @@ static struct neat_flow_operations ops;
 static struct neat_ctx *ctx = NULL;
 static struct neat_flow *flow = NULL;
 
+static char *config_property = "{\n\
+    \"transport\": [\n\
+        {\n\
+            \"value\": \"SCTP\",\n\
+            \"precedence\": 1\n\
+        },\n\
+        {\n\
+            \"value\": \"TCP\",\n\
+            \"precedence\": 1\n\
+        }\n\
+    ]\n\
+}";
+
+
 GstElement *pipeline, *sink;
 GstSample *sample;
 
@@ -118,7 +132,7 @@ on_writable(struct neat_flow_operations *opCB)
 
 		/* Mapping a buffer can fail (non-readable) */
 		if (gst_buffer_map (buffer, &map, GST_MAP_READ)) {
-			int code = neat_write(opCB->ctx, opCB->flow, map.data, map.size);
+			int code = neat_write(opCB->ctx, opCB->flow, map.data, map.size, NULL, 0);
 
 			if (code != NEAT_OK) {
 				fprintf(stderr, "%s - neat_write - error: %d\n", __func__, (int)code);
@@ -175,7 +189,7 @@ main(int argc, char *argv[])
 	GError *error = NULL;
 	GstStateChangeReturn ret;
 
-    uint64_t prop = 0;
+    char *arg_property = NULL;
 	int result;
 
 	gst_init (&argc, &argv);
@@ -236,10 +250,8 @@ main(int argc, char *argv[])
         goto cleanup;
     }
 
-	prop |= NEAT_PROPERTY_UDP_REQUIRED | NEAT_PROPERTY_IPV4_REQUIRED;
-
     // set properties
-    if (neat_set_property(ctx, flow, prop)) {
+    if (neat_set_property(ctx, flow, arg_property ? arg_property : config_property)) {
         fprintf(stderr, "%s - error: neat_set_property\n", __func__);
         result = EXIT_FAILURE;
         goto cleanup;
@@ -261,7 +273,7 @@ main(int argc, char *argv[])
     }
 
     // wait for on_connected or on_error to be invoked
-    if (neat_open(ctx, flow, HOST, PORT) == NEAT_OK) {
+    if (neat_open(ctx, flow, HOST, PORT, NULL, 0) == NEAT_OK) {
         neat_start_event_loop(ctx, NEAT_RUN_DEFAULT);
     } else {
         fprintf(stderr, "%s - error: neat_open\n", __func__);
