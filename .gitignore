@@ -3,3 +3,4 @@
 *.out
 cscope.out
 .gdb_history
+build/
