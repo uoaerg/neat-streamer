@@ -1,7 +1,5 @@
 #include <gst/gst.h>
 
-//#include <gst/app/gstappsink.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -14,8 +12,8 @@
 #include <netdb.h>
 #include <uv.h>
 
-#include "../neat/neat.h"
-#include "../neat/neat_internal.h"
+#include "neat/neat.h"
+#include "neat/neat_internal.h"
 
 #define HOST "127.0.0.1"
 #define PORT 5000
@@ -33,19 +31,18 @@ static struct neat_flow_operations ops;
 static struct neat_ctx *ctx = NULL;
 static struct neat_flow *flow = NULL;
 
-static char *config_property = "{\n\
-    \"transport\": [\n\
-        {\n\
-            \"value\": \"SCTP\",\n\
-            \"precedence\": 1\n\
-        },\n\
-        {\n\
-            \"value\": \"TCP\",\n\
-            \"precedence\": 1\n\
-        }\n\
-    ]\n\
-}";
-
+static char *config_property = "{\
+    \"transport\": [\
+        {\
+            \"value\": \"UDP\",\
+            \"precedence\": 1\
+        }\
+    ],\
+    \"security\": {\
+        \"value\": false,\
+        \"precedence\": 2\
+    }\
+}";\
 
 GstElement *pipeline, *sink;
 GstSample *sample;
