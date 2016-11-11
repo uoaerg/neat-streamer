@@ -24,7 +24,7 @@ if [[ "$unamestr" == 'Darwin' ]]; then
 		-Wno-unused-function -Wno-unused-parameter -g build/neat-streamer.o -o neat-streamer \
 		neat/build/libneat.dylib /usr/local/lib/libuv.dylib /usr/local/lib/libldns.dylib \
 		/usr/local/lib/libjansson.dylib \
-		-L/usr/local/lib -Lneat/build/ -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 \
+		-L/usr/local/lib -Lneat/build/ -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 -lgstapp-1.0 \
 		-Wl,-rpath,/usr/home/tom/code/neat/build:/usr/local/lib 
 elif [[ "$unamestr" == 'FreeBSD' ]]; then
 	platform='freebsd'

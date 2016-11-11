@@ -1,4 +1,6 @@
 #include <gst/gst.h>
+#include <gst/app/gstappsrc.h>
+#include <gst/app/gstappsink.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,7 +29,10 @@
 
 static struct neat_flow_operations ops;
 static struct neat_ctx *ctx = NULL;
-static struct neat_flow *flow = NULL;
+static struct neat_flow *main_flow = NULL;
+static int want = 0;
+
+uv_prepare_t *prepare_handle;
 
 static char *config_property = "{\
     \"transport\": [\
@@ -51,9 +56,10 @@ GstSample *sample;
 static neat_error_code on_all_written(struct neat_flow_operations *opCB);
 int read_file(const char *, const char **);
 
-GstElement *setupvideosender();
-GstElement *setupvideoreceiver();
-static void feed_pipeline(GstElement *);
+GstAppSink *setupvideosender();
+GstAppSrc *setupvideoreceiver();
+static void feed_pipeline(GstAppSrc *);
+void pump_g_loop(uv_prepare_t *handle);
 
 struct neat_streamer {
 /* needs to capture a mode, gstreamer pipelines, protocol state, tons of shit*/
@@ -63,8 +69,8 @@ struct neat_streamer {
 
 	GstElement *camerapipeline;			// Not sure about these
 	GstElement *displaypipeline;		// Not sure about these
-	GstElement *appsink;
-	GstElement *appsrc;
+	GstAppSink *appsink;
+	GstAppSrc  *appsrc;
 };
 
 struct neat_streamer *alloc_neat_streamer(void);
@@ -105,12 +111,10 @@ free_neat_streamer(struct neat_streamer *nst)
     free(nst);
 }
 
-GstElement *
+GstAppSink *
 setupvideosender()
 {
-	
 	GstElement *pipeline, *appsink;
-	/* gstreamer stuff */
 	gchar *descr;
 	GError *error = NULL;
 	GstStateChangeReturn ret;
@@ -155,10 +159,25 @@ setupvideosender()
 		exit(-1);
 	}
 
-	return appsink;
+	return (GstAppSink *)appsink;
 }
 
-GstElement *
+void 
+pump_g_loop(uv_prepare_t *handle)
+{
+	GstAppSrc *appsrc = handle->data;
+	feed_pipeline(appsrc);
+	g_main_context_iteration(g_main_context_default(),FALSE);
+}
+
+static void 
+cb_need_data (GstElement *appsrc, guint unused_size, gpointer user_data) 
+{
+	//prepare_buffer((GstAppSrc*)appsrc);
+	want = 1;
+}
+
+GstAppSrc *
 setupvideoreceiver()
 {
 	GstElement *pipeline, *appsrc, *conv, *videosink;
@@ -182,20 +201,20 @@ setupvideoreceiver()
 
 	/* setup appsrc */
 	g_object_set (G_OBJECT (appsrc),
-		"stream-type", 0,
-		"format", GST_FORMAT_TIME, NULL);
-	//TODO: This is not what we want to do, there is no g_main_loop
-	//g_signal_connect(appsrc, "need-data", G_CALLBACK (cb_need_data), NULL);
+		"stream-type", 0, // GST_APP_STREAM_TYPE_STREAM
+		"format", GST_FORMAT_TIME,
+		"is-live", TRUE,
+		NULL);
+	g_signal_connect (appsrc, "need-data", G_CALLBACK (cb_need_data), NULL);
 
 	/* play */
 	gst_element_set_state(pipeline, GST_STATE_PLAYING);
 
-	//return pipeline;
-	return appsrc;
+	return (GstAppSrc *)appsrc;
 }
 
 static void
-feed_pipeline(GstElement *appsrc)
+feed_pipeline(GstAppSrc *appsrc)
 {
 	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
 	static gboolean white = FALSE;
@@ -204,12 +223,18 @@ feed_pipeline(GstElement *appsrc)
 	guint size;
 	GstFlowReturn ret;
 
+	if(!want) {
+		return;
+	}
+	want = 0;
+
 	size = 385 * 288 * 2;
 
 	buffer = gst_buffer_new_allocate (NULL, size, NULL);
 
 	/* this makes the image black/white */
 	gst_buffer_memset (buffer, 0, white ? 0xff : 0x0, size);
+//  buffer = gst_buffer_new_wrapped_full( 0, (gpointer)(white?b_white:b_black), size, 0, size, NULL, NULL );
 
 	white = !white;
 
@@ -217,9 +242,11 @@ feed_pipeline(GstElement *appsrc)
 	GST_BUFFER_DURATION (buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 2);
 
 	timestamp += GST_BUFFER_DURATION (buffer);
-
+/*
 	g_signal_emit_by_name (appsrc, "push-buffer", buffer, &ret);
 	gst_buffer_unref (buffer);
+*/
+	ret = gst_app_src_push_buffer(appsrc, buffer);
 
 	if (ret != GST_FLOW_OK) {
 		/* something wrong, stop pushing */
@@ -377,8 +404,9 @@ on_connected(struct neat_flow_operations *opCB)
     nst = opCB->userData;
 
     if(camerasrc) {
-		nst->appsink = setupvideosender();
         fprintf(stdout, "%s:%d %s \n", __func__, __LINE__, "Sending video");
+
+		nst->appsink = setupvideosender();
 
         opCB->on_readable = NULL;
         opCB->on_writable = on_writable;
@@ -387,8 +415,10 @@ on_connected(struct neat_flow_operations *opCB)
 	}
 
 	if(displaysink) {
-		nst->appsrc = setupvideoreceiver();
         fprintf(stdout, "%s:%d %s \n", __func__, __LINE__, "Receiving video");
+
+		nst->appsrc = setupvideoreceiver();
+		uv_prepare_start(prepare_handle, pump_g_loop);
 
         opCB->on_readable = on_readable;
         opCB->on_writable = NULL;
@@ -593,14 +623,14 @@ main(int argc, char *argv[])
     }
 
     // new neat flow
-    if ((flow = neat_new_flow(ctx)) == NULL) {
+    if ((main_flow = neat_new_flow(ctx)) == NULL) {
         fprintf(stderr, "%s - error: could not create new neat flow\n", __func__);
         result = EXIT_FAILURE;
         goto cleanup;
     }
 
     // set properties
-    if (neat_set_property(ctx, flow, arg_property ? arg_property : config_property)) {
+    if (neat_set_property(ctx, main_flow, arg_property ? arg_property : config_property)) {
         fprintf(stderr, "%s - error: neat_set_property\n", __func__);
         result = EXIT_FAILURE;
         goto cleanup;
@@ -617,7 +647,7 @@ main(int argc, char *argv[])
     ops.on_network_status_changed = on_network_changed;
     ops.on_timeout = on_timeout;
 
-    if (neat_set_operations(ctx, flow, &ops)) {
+    if (neat_set_operations(ctx, main_flow, &ops)) {
         fprintf(stderr, "%s - error: neat_set_operations\n", __func__);
         result = EXIT_FAILURE;
         goto cleanup;
@@ -627,7 +657,7 @@ main(int argc, char *argv[])
 	if(camerasrc) {
         fprintf(stdout, "%s:%d %s %s:%d\n",
 			__func__, __LINE__, "Connecting to, ", target_addr, config_port);
-		if (neat_open(ctx, flow, target_addr, config_port, NULL, 0) != NEAT_OK) {
+		if (neat_open(ctx, main_flow, target_addr, config_port, NULL, 0) != NEAT_OK) {
 			fprintf(stderr, "%s - error: neat_open\n", __func__);
 			result = EXIT_FAILURE;
 			goto cleanup;
@@ -635,30 +665,36 @@ main(int argc, char *argv[])
 	} else {
         fprintf(stdout, "%s:%d %s %d\n",
 			__func__, __LINE__, "Listening on port", config_port);
-        if (neat_accept(ctx, flow, config_port, NULL, 0) != NEAT_OK) {
+        if (neat_accept(ctx, main_flow, config_port, NULL, 0) != NEAT_OK) {
             fprintf(stderr, "%s - neat_accept failed\n", __func__);
             result = EXIT_FAILURE;
             goto cleanup;
         }
 	}
+	/* setup integration with g_mainloop */
 
-	fprintf(stdout, "%s:%d %s\n",
-		__func__, __LINE__, "starting event loop");
+	prepare_handle = calloc(1, sizeof(uv_prepare_t));
+	if(prepare_handle == NULL) {
+		goto cleanup;
+	}
+	uv_prepare_init(ctx->loop, prepare_handle);
+
 	neat_start_event_loop(ctx, NEAT_RUN_DEFAULT); /* Blocks while app runs */
 
 cleanup:
-
-    // cleanup
-    if (flow != NULL) {
-        //neat_free_flow(flow);
-    }
-    if (ctx != NULL) {
-        neat_free_ctx(ctx);
-    }
-
 /* this should be somewhere
 	gst_element_set_state (camerapipeline, GST_STATE_NULL);
 	gst_object_unref (camerapipeline);
 */
+
+	if(prepare_handle != NULL) {
+		uv_prepare_stop(prepare_handle);
+		free(prepare_handle);
+	}
+
+    if (ctx != NULL) {
+        neat_free_ctx(ctx);
+    }
+
     exit(result);
 }
