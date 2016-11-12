@@ -44,7 +44,7 @@ static char *config_property = "{\
 }";\
 
 static uint32_t config_port=6969;
-static uint16_t config_log_level = 1;
+static uint16_t config_log_level = 0;
 static uint32_t config_buffer_size_max = 1400;
 static char *config_pem_file = NULL;
 
@@ -52,14 +52,6 @@ static uint8_t camerasrc = 0;
 static uint8_t displaysink = 0;
 
 GstSample *sample;
-
-static neat_error_code on_all_written(struct neat_flow_operations *opCB);
-int read_file(const char *, const char **);
-
-GstAppSink *setupvideosender();
-GstAppSrc *setupvideoreceiver();
-static void feed_pipeline(GstAppSrc *);
-void pump_g_loop(uv_prepare_t *handle);
 
 struct neat_streamer {
 /* needs to capture a mode, gstreamer pipelines, protocol state, tons of shit*/
@@ -71,10 +63,19 @@ struct neat_streamer {
 	GstElement *displaypipeline;		// Not sure about these
 	GstAppSink *appsink;
 	GstAppSrc  *appsrc;
+	GstBuffer  *gst_buffer;
 };
+
+static neat_error_code on_all_written(struct neat_flow_operations *opCB);
+int read_file(const char *, const char **);
+
+GstAppSink *setupvideosender();
+GstAppSrc *setupvideoreceiver();
+void pump_g_loop(uv_prepare_t *handle);
 
 struct neat_streamer *alloc_neat_streamer(void);
 void free_neat_streamer(struct neat_streamer *);
+static void feed_pipeline(GstAppSrc *, struct neat_streamer *);
 
 struct neat_streamer *
 alloc_neat_streamer()
@@ -165,8 +166,10 @@ setupvideosender()
 void 
 pump_g_loop(uv_prepare_t *handle)
 {
-	GstAppSrc *appsrc = handle->data;
-	feed_pipeline(appsrc);
+	struct neat_streamer *nst = handle->data;
+
+	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
+	feed_pipeline(nst->appsrc, nst);
 	g_main_context_iteration(g_main_context_default(),FALSE);
 }
 
@@ -180,24 +183,48 @@ cb_need_data (GstElement *appsrc, guint unused_size, gpointer user_data)
 GstAppSrc *
 setupvideoreceiver()
 {
-	GstElement *pipeline, *appsrc, *conv, *videosink;
+	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
+	GstElement *pipeline, *appsrc,  *rtpdepay, *decodebin, *videosink;
 
 	/* setup pipeline */
 	pipeline = gst_pipeline_new("pipeline");
 	appsrc = gst_element_factory_make("appsrc", "source");
-	conv = gst_element_factory_make("videoconvert", "conv");
+	rtpdepay = gst_element_factory_make("rtph264depay", "rtpdepay");
+	decodebin = gst_element_factory_make("decodebin", "decodebin");
 	videosink = gst_element_factory_make("autovideosink", "videosink");
+/*
+	GstCaps *caps = gst_caps_new_simple("application/x-rtp",
+		"media", G_TYPE_STRING,"video", NULL);
 
-	/* connect everything together */
+	gst_app_src_set_caps((GstAppSrc *) appsrc, caps);
+GST_LOG ("appsrc are %" GST_PTR_FORMAT, caps);
+GST_ERROR("appsrc are %" GST_PTR_FORMAT, caps);
+fprintf(stdout, "%s:%d\n", __func__, __LINE__);
+*/
+GstCaps *caps = gst_caps_from_string ("application/x-rtp,media=(string)video,clock-rate=(int)90000,encoding-name=(string)H264");
+g_object_set (appsrc, "caps", caps, NULL);
+
+/*
 	g_object_set(G_OBJECT (appsrc), "caps",
-	gst_caps_new_simple("video/x-raw",
-		"format", G_TYPE_STRING, "RGB16",
-		"width", G_TYPE_INT, 384,
-		"height", G_TYPE_INT, 288,
-		"framerate", GST_TYPE_FRACTION, 0, 1,
-		NULL), NULL);
-	gst_bin_add_many(GST_BIN (pipeline), appsrc, conv, videosink, NULL);
-	gst_element_link_many(appsrc, conv, videosink, NULL);
+		gst_caps_new_simple( "application/x-rtp",
+			"media", G_TYPE_STRING,"video",
+			"clock-rate", G_TYPE_INT, 90000,
+			"encoding-name", G_TYPE_STRING, "H264",
+			NULL), 
+		NULL);
+*/
+/*
+	g_object_set(G_OBJECT (appsrc), "caps",
+		gst_caps_new_simple("video/x-raw",
+			"format", G_TYPE_STRING, "RGB16",
+			"width", G_TYPE_INT, 384,
+			"height", G_TYPE_INT, 288,
+			"framerate", GST_TYPE_FRACTION, 0, 1,
+			NULL), 
+		NULL);
+*/
+	gst_bin_add_many(GST_BIN(pipeline), appsrc, rtpdepay, decodebin, videosink, NULL);
+	gst_element_link_many(appsrc, rtpdepay, decodebin, videosink, NULL);
 
 	/* setup appsrc */
 	g_object_set (G_OBJECT (appsrc),
@@ -214,13 +241,14 @@ setupvideoreceiver()
 }
 
 static void
-feed_pipeline(GstAppSrc *appsrc)
+feed_pipeline(GstAppSrc *appsrc, struct neat_streamer *nst)
 {
 	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
-	static gboolean white = FALSE;
+    if (config_log_level >= 1) {
+		fprintf(stdout, "%s:%d\n", __func__, __LINE__);
+    }
+
 	static GstClockTime timestamp = 0;
-	GstBuffer *buffer;
-	guint size;
 	GstFlowReturn ret;
 
 	if(!want) {
@@ -228,25 +256,13 @@ feed_pipeline(GstAppSrc *appsrc)
 	}
 	want = 0;
 
-	size = 385 * 288 * 2;
+	gst_buffer_fill (nst->gst_buffer, 0, nst->buffer, nst->buffer_size);
 
-	buffer = gst_buffer_new_allocate (NULL, size, NULL);
+	GST_BUFFER_PTS(nst->gst_buffer) = timestamp;
+	GST_BUFFER_DURATION(nst->gst_buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 2);
 
-	/* this makes the image black/white */
-	gst_buffer_memset (buffer, 0, white ? 0xff : 0x0, size);
-//  buffer = gst_buffer_new_wrapped_full( 0, (gpointer)(white?b_white:b_black), size, 0, size, NULL, NULL );
-
-	white = !white;
-
-	GST_BUFFER_PTS (buffer) = timestamp;
-	GST_BUFFER_DURATION (buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 2);
-
-	timestamp += GST_BUFFER_DURATION (buffer);
-/*
-	g_signal_emit_by_name (appsrc, "push-buffer", buffer, &ret);
-	gst_buffer_unref (buffer);
-*/
-	ret = gst_app_src_push_buffer(appsrc, buffer);
+	timestamp += GST_BUFFER_DURATION (nst->gst_buffer);
+	ret = gst_app_src_push_buffer(appsrc, nst->gst_buffer);
 
 	if (ret != GST_FLOW_OK) {
 		/* something wrong, stop pushing */
@@ -254,6 +270,9 @@ feed_pipeline(GstAppSrc *appsrc)
 			"Something is broken in gstreamer");
 		exit(-1);
 	}
+	//fprintf(stdout, "%s:%d\n", __func__, __LINE__);
+	//gst_buffer_unref(buffer);
+	//fprintf(stdout, "%s:%d\n", __func__, __LINE__);
 }
 
 // Error handler
@@ -314,7 +333,7 @@ on_readable(struct neat_flow_operations *opCB)
 			return on_error(opCB);
 		}
 	}
-	feed_pipeline(nst->appsrc);
+	feed_pipeline(nst->appsrc, nst);
 
     return NEAT_OK;
 }
@@ -354,6 +373,7 @@ on_writable(struct neat_flow_operations *opCB)
 				fprintf(stderr, "%s - neat_write - error: %d\n", __func__, (int)code);
 				gst_buffer_unmap (buffer, &map);
 				gst_sample_unref(sample);
+				exit(EXIT_FAILURE);
 
 				return on_error(opCB);
 			} else if(cnt++ > 100) {
@@ -402,6 +422,7 @@ on_connected(struct neat_flow_operations *opCB)
     //neat_set_ecn(opCB->ctx, opCB->flow, 0x00);
 
     nst = opCB->userData;
+	nst->gst_buffer = gst_buffer_new_allocate(NULL, config_buffer_size_max, NULL);
 
     if(camerasrc) {
         fprintf(stdout, "%s:%d %s \n", __func__, __LINE__, "Sending video");
@@ -418,6 +439,7 @@ on_connected(struct neat_flow_operations *opCB)
         fprintf(stdout, "%s:%d %s \n", __func__, __LINE__, "Receiving video");
 
 		nst->appsrc = setupvideoreceiver();
+		prepare_handle->data = nst;
 		uv_prepare_start(prepare_handle, pump_g_loop);
 
         opCB->on_readable = on_readable;
