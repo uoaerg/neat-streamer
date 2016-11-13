@@ -31,6 +31,7 @@ static struct neat_flow_operations ops;
 static struct neat_ctx *ctx = NULL;
 static struct neat_flow *main_flow = NULL;
 static int want = 0;
+static int connected = 0;
 
 uv_prepare_t *prepare_handle;
 
@@ -166,16 +167,17 @@ setupvideosender()
 void 
 pump_g_loop(uv_prepare_t *handle)
 {
-	struct neat_streamer *nst = handle->data;
+//	struct neat_streamer *nst = handle->data;
 
-	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
-	feed_pipeline(nst->appsrc, nst);
+//	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
+//	feed_pipeline(nst->appsrc, nst);
 	g_main_context_iteration(g_main_context_default(),FALSE);
 }
 
 static void 
 cb_need_data (GstElement *appsrc, guint unused_size, gpointer user_data) 
 {
+	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
 	//prepare_buffer((GstAppSrc*)appsrc);
 	want = 1;
 }
@@ -243,7 +245,6 @@ g_object_set (appsrc, "caps", caps, NULL);
 static void
 feed_pipeline(GstAppSrc *appsrc, struct neat_streamer *nst)
 {
-	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
     if (config_log_level >= 1) {
 		fprintf(stdout, "%s:%d\n", __func__, __LINE__);
     }
@@ -255,24 +256,27 @@ feed_pipeline(GstAppSrc *appsrc, struct neat_streamer *nst)
 		return;
 	}
 	want = 0;
+	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
+
+	assert(nst->gst_buffer);
+	GST_IS_BUFFER(nst->gst_buffer);
 
 	gst_buffer_fill (nst->gst_buffer, 0, nst->buffer, nst->buffer_size);
 
 	GST_BUFFER_PTS(nst->gst_buffer) = timestamp;
 	GST_BUFFER_DURATION(nst->gst_buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 2);
-
 	timestamp += GST_BUFFER_DURATION (nst->gst_buffer);
+
+//    fprintf(stdout, "%s:%d %s buffer ptr %p\n", 
+//		__func__, __LINE__, "app_src_push pre", nst->gst_buffer);
 	ret = gst_app_src_push_buffer(appsrc, nst->gst_buffer);
 
 	if (ret != GST_FLOW_OK) {
 		/* something wrong, stop pushing */
         fprintf(stderr, "%s:%d %s\n", __func__, __LINE__, 
 			"Something is broken in gstreamer");
-		exit(-1);
+		//exit(-1);
 	}
-	//fprintf(stdout, "%s:%d\n", __func__, __LINE__);
-	//gst_buffer_unref(buffer);
-	//fprintf(stdout, "%s:%d\n", __func__, __LINE__);
 }
 
 // Error handler
@@ -333,7 +337,9 @@ on_readable(struct neat_flow_operations *opCB)
 			return on_error(opCB);
 		}
 	}
-	feed_pipeline(nst->appsrc, nst);
+	if(want) {
+		feed_pipeline(nst->appsrc, nst);
+	}
 
     return NEAT_OK;
 }
@@ -436,6 +442,12 @@ on_connected(struct neat_flow_operations *opCB)
 	}
 
 	if(displaysink) {
+		if(connected) {
+			fprintf(stdout, "%s:%d %s \n", __func__, __LINE__, "double connect, exiting...");
+			exit(EXIT_FAILURE);
+		}
+		connected = 1;
+
         fprintf(stdout, "%s:%d %s \n", __func__, __LINE__, "Receiving video");
 
 		nst->appsrc = setupvideoreceiver();
