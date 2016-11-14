@@ -17,7 +17,8 @@ echo "compiling"
 
 echo "linking"
 unamestr=`uname`
-if [[ "$unamestr" == 'Darwin' ]]; then
+
+if [ "$unamestr" == 'Darwin' ]; then
 	echo "MacOS"
 	/usr/bin/cc -DHAVE_NETINET_SCTP_H -DHAVE_SCTP_SEND_FAILED_EVENT \
 		-DHAVE_SCTP_EVENT_SUBSCRIBE -std=c99 -pedantic -Wall -Wextra -Werror \
@@ -26,7 +27,7 @@ if [[ "$unamestr" == 'Darwin' ]]; then
 		/usr/local/lib/libjansson.dylib \
 		-L/usr/local/lib -Lneat/build/ -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 -lgstapp-1.0 \
 		-Wl,-rpath,/usr/home/tom/code/neat/build:/usr/local/lib 
-elif [[ "$unamestr" == 'FreeBSD' ]]; then
+elif [ "$unamestr" == 'FreeBSD' ]; then
 	platform='freebsd'
 	echo "FreeBSD"
 	/usr/bin/cc -DHAVE_NETINET_SCTP_H -DHAVE_SCTP_SEND_FAILED_EVENT \
