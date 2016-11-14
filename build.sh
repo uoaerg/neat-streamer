@@ -35,6 +35,6 @@ elif [ "$unamestr" == 'FreeBSD' ]; then
 		-Wno-unused-function -Wno-unused-parameter -g build/neat-streamer.o -o neat-streamer \
 		neat/build/libneat.so /usr/local/lib/libuv.so /usr/local/lib/libldns.so \
 		/usr/local/lib/libjansson.so \
-		-L/usr/local/lib -Lneat/build/ -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 -lintl \
+		-L/usr/local/lib -Lneat/build/ -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 -lintl -lgstapp-1.0 \
 		-Wl,-rpath,/usr/home/tom/code/neat/build:/usr/local/lib 
 fi
