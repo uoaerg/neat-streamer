@@ -76,7 +76,7 @@ void pump_g_loop(uv_prepare_t *handle);
 
 struct neat_streamer *alloc_neat_streamer(void);
 void free_neat_streamer(struct neat_streamer *);
-static void feed_pipeline(GstAppSrc *, struct neat_streamer *);
+static void feed_pipeline(struct neat_streamer *);
 
 struct neat_streamer *
 alloc_neat_streamer()
@@ -243,7 +243,7 @@ g_object_set (appsrc, "caps", caps, NULL);
 }
 
 static void
-feed_pipeline(GstAppSrc *appsrc, struct neat_streamer *nst)
+feed_pipeline(struct neat_streamer *nst)
 {
     if (config_log_level >= 1) {
 		fprintf(stdout, "%s:%d\n", __func__, __LINE__);
@@ -259,7 +259,7 @@ feed_pipeline(GstAppSrc *appsrc, struct neat_streamer *nst)
 	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
 
 	assert(nst->gst_buffer);
-	GST_IS_BUFFER(nst->gst_buffer);
+	assert(GST_IS_BUFFER(nst->gst_buffer));
 
 	gst_buffer_fill (nst->gst_buffer, 0, nst->buffer, nst->buffer_size);
 
@@ -269,7 +269,7 @@ feed_pipeline(GstAppSrc *appsrc, struct neat_streamer *nst)
 
 //    fprintf(stdout, "%s:%d %s buffer ptr %p\n", 
 //		__func__, __LINE__, "app_src_push pre", nst->gst_buffer);
-	ret = gst_app_src_push_buffer(appsrc, nst->gst_buffer);
+	ret = gst_app_src_push_buffer(nst->appsrc, nst->gst_buffer);
 
 	if (ret != GST_FLOW_OK) {
 		/* something wrong, stop pushing */
@@ -326,6 +326,7 @@ on_readable(struct neat_flow_operations *opCB)
 
 	code = neat_read(opCB->ctx, opCB->flow, nst->buffer, 
 		nst->buffer_alloc, &nst->buffer_size, NULL, 0);
+
 	if (code != NEAT_OK) {
 		if (code == NEAT_ERROR_WOULD_BLOCK) {
 			if (config_log_level >= 1) {
@@ -337,8 +338,9 @@ on_readable(struct neat_flow_operations *opCB)
 			return on_error(opCB);
 		}
 	}
+
 	if(want) {
-		feed_pipeline(nst->appsrc, nst);
+		feed_pipeline(nst);
 	}
 
     return NEAT_OK;
@@ -429,6 +431,7 @@ on_connected(struct neat_flow_operations *opCB)
 
     nst = opCB->userData;
 	nst->gst_buffer = gst_buffer_new_allocate(NULL, config_buffer_size_max, NULL);
+	gst_buffer_ref(nst->gst_buffer); 	//bump the ref count, docs are not clear if new does this.
 
     if(camerasrc) {
         fprintf(stdout, "%s:%d %s \n", __func__, __LINE__, "Sending video");
@@ -445,8 +448,9 @@ on_connected(struct neat_flow_operations *opCB)
 		if(connected) {
 			fprintf(stdout, "%s:%d %s \n", __func__, __LINE__, "double connect, exiting...");
 			exit(EXIT_FAILURE);
+		} else {
+			connected = 1;
 		}
-		connected = 1;
 
         fprintf(stdout, "%s:%d %s \n", __func__, __LINE__, "Receiving video");
 
