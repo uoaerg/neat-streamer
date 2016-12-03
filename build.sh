@@ -1,7 +1,7 @@
 #gcc -g -Wall udpbin.c -o udpbin -I/usr/local/include/gstreamer-1.0 -I/usr/local/lib/gstreamer-1.0/include -I/usr/local/include/glib-2.0 -I/usr/local/lib/glib-2.0/include -I/usr/local/include -pthread -L/usr/local/lib -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 -lintl  
 
 #might need this 
-# export LD_LIBRARY_PATH=neat-streamer/neat/build:$LD_LIBRARY_PATH  
+# export LD_LIBRARY_PATH=neat/build:$LD_LIBRARY_PATH  
 
 set -e
 
