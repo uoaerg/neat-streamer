@@ -175,7 +175,7 @@ pump_g_loop(uv_prepare_t *handle)
 }
 
 static void 
-cb_need_data (GstElement *appsrc, guint unused_size, gpointer user_data) 
+cb_need_data(GstElement *appsrc, guint unused_size, gpointer user_data) 
 {
 	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
 	//prepare_buffer((GstAppSrc*)appsrc);
@@ -256,20 +256,17 @@ feed_pipeline(struct neat_streamer *nst)
 		return;
 	}
 	want = 0;
-	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
+	fprintf(stdout, "%s:%d pushing data to gstbuffer\n", __func__, __LINE__);
 
-	assert(nst->gst_buffer);
-	assert(GST_IS_BUFFER(nst->gst_buffer));
+	GstBuffer *buffer = gst_buffer_new_allocate(NULL, config_buffer_size_max, NULL);
 
-	gst_buffer_fill (nst->gst_buffer, 0, nst->buffer, nst->buffer_size);
+	gst_buffer_fill(buffer, 0, nst->buffer, nst->buffer_size);
 
-	GST_BUFFER_PTS(nst->gst_buffer) = timestamp;
-	GST_BUFFER_DURATION(nst->gst_buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 2);
-	timestamp += GST_BUFFER_DURATION (nst->gst_buffer);
+	GST_BUFFER_PTS(buffer) = timestamp;
+	GST_BUFFER_DURATION(buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 2);
+	timestamp += GST_BUFFER_DURATION(buffer);
 
-//    fprintf(stdout, "%s:%d %s buffer ptr %p\n", 
-//		__func__, __LINE__, "app_src_push pre", nst->gst_buffer);
-	ret = gst_app_src_push_buffer(nst->appsrc, nst->gst_buffer);
+	ret = gst_app_src_push_buffer(nst->appsrc, buffer);
 
 	if (ret != GST_FLOW_OK) {
 		/* something wrong, stop pushing */
@@ -594,6 +591,8 @@ main(int argc, char *argv[])
     result = EXIT_SUCCESS;
 	gst_init (&argc, &argv);
 
+	neat_log_level(NEAT_LOG_OFF);
+
 	while ((arg = getopt(argc, argv, "P:S:v:h:p:c:sr")) != -1) {
         switch(arg) {
         case 'P':
@@ -659,6 +658,7 @@ main(int argc, char *argv[])
         result = EXIT_FAILURE;
         goto cleanup;
     }
+
 
     // new neat flow
     if ((main_flow = neat_new_flow(ctx)) == NULL) {
