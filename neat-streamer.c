@@ -177,9 +177,11 @@ pump_g_loop(uv_prepare_t *handle)
 static void 
 cb_need_data(GstElement *appsrc, guint unused_size, gpointer user_data) 
 {
-	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
+    if (config_log_level >= 1) {
+		fprintf(stdout, "%s:%d\n", __func__, __LINE__);
+    }
 	//prepare_buffer((GstAppSrc*)appsrc);
-	want = 1;
+	want++;
 }
 
 GstAppSrc *
@@ -194,37 +196,12 @@ setupvideoreceiver()
 	rtpdepay = gst_element_factory_make("rtph264depay", "rtpdepay");
 	decodebin = gst_element_factory_make("decodebin", "decodebin");
 	videosink = gst_element_factory_make("autovideosink", "videosink");
-/*
-	GstCaps *caps = gst_caps_new_simple("application/x-rtp",
-		"media", G_TYPE_STRING,"video", NULL);
 
-	gst_app_src_set_caps((GstAppSrc *) appsrc, caps);
-GST_LOG ("appsrc are %" GST_PTR_FORMAT, caps);
-GST_ERROR("appsrc are %" GST_PTR_FORMAT, caps);
-fprintf(stdout, "%s:%d\n", __func__, __LINE__);
-*/
-GstCaps *caps = gst_caps_from_string ("application/x-rtp,media=(string)video,clock-rate=(int)90000,encoding-name=(string)H264");
-g_object_set (appsrc, "caps", caps, NULL);
+	GstCaps *caps = gst_caps_from_string(
+		"application/x-rtp,media=(string)video,"
+		"clock-rate=(int)90000,encoding-name=(string)H264");
+	g_object_set (appsrc, "caps", caps, NULL);
 
-/*
-	g_object_set(G_OBJECT (appsrc), "caps",
-		gst_caps_new_simple( "application/x-rtp",
-			"media", G_TYPE_STRING,"video",
-			"clock-rate", G_TYPE_INT, 90000,
-			"encoding-name", G_TYPE_STRING, "H264",
-			NULL), 
-		NULL);
-*/
-/*
-	g_object_set(G_OBJECT (appsrc), "caps",
-		gst_caps_new_simple("video/x-raw",
-			"format", G_TYPE_STRING, "RGB16",
-			"width", G_TYPE_INT, 384,
-			"height", G_TYPE_INT, 288,
-			"framerate", GST_TYPE_FRACTION, 0, 1,
-			NULL), 
-		NULL);
-*/
 	gst_bin_add_many(GST_BIN(pipeline), appsrc, rtpdepay, decodebin, videosink, NULL);
 	gst_element_link_many(appsrc, rtpdepay, decodebin, videosink, NULL);
 
@@ -237,7 +214,10 @@ g_object_set (appsrc, "caps", caps, NULL);
 	g_signal_connect (appsrc, "need-data", G_CALLBACK (cb_need_data), NULL);
 
 	/* play */
+	fprintf(stdout, "%s:%d Setting play on pipeline\n", __func__, __LINE__);
 	gst_element_set_state(pipeline, GST_STATE_PLAYING);
+
+	GST_DEBUG_BIN_TO_DOT_FILE((GstBin *)pipeline, GST_DEBUG_GRAPH_SHOW_ALL, "pipeline");
 
 	return (GstAppSrc *)appsrc;
 }
@@ -248,6 +228,8 @@ feed_pipeline(struct neat_streamer *nst)
     if (config_log_level >= 1) {
 		fprintf(stdout, "%s:%d\n", __func__, __LINE__);
     }
+	fprintf(stdout, "%s:%d data level %" G_GUINT64_FORMAT "\n", __func__, __LINE__,
+		gst_app_src_get_current_level_bytes(nst->appsrc));
 
 	static GstClockTime timestamp = 0;
 	GstFlowReturn ret;
@@ -256,7 +238,9 @@ feed_pipeline(struct neat_streamer *nst)
 		return;
 	}
 	want = 0;
-	fprintf(stdout, "%s:%d pushing data to gstbuffer\n", __func__, __LINE__);
+	if(want > 1) {
+		fprintf(stdout, "%s:%d %d\n", __func__, __LINE__, want);
+	}
 
 	GstBuffer *buffer = gst_buffer_new_allocate(NULL, config_buffer_size_max, NULL);
 
@@ -274,6 +258,9 @@ feed_pipeline(struct neat_streamer *nst)
 			"Something is broken in gstreamer");
 		//exit(-1);
 	}
+
+	fprintf(stdout, "%s:%d data level %" G_GUINT64_FORMAT "\n", __func__, __LINE__,
+		gst_app_src_get_current_level_bytes(nst->appsrc));
 }
 
 // Error handler
