@@ -51,6 +51,9 @@ static char *config_pem_file = NULL;
 
 static uint8_t camerasrc = 0;
 static uint8_t displaysink = 0;
+static uint8_t initiator = 0;
+static uint8_t duplex = 0;
+static uint8_t happy = 0;
 
 GstSample *sample;
 
@@ -228,8 +231,8 @@ feed_pipeline(struct neat_streamer *nst)
     if (config_log_level >= 1) {
 		fprintf(stdout, "%s:%d\n", __func__, __LINE__);
     }
-	fprintf(stdout, "%s:%d data level %" G_GUINT64_FORMAT "\n", __func__, __LINE__,
-		gst_app_src_get_current_level_bytes(nst->appsrc));
+//	fprintf(stdout, "%s:%d data level %" G_GUINT64_FORMAT "\n", __func__, __LINE__,
+//		gst_app_src_get_current_level_bytes(nst->appsrc));
 
 	static GstClockTime timestamp = 0;
 	GstFlowReturn ret;
@@ -259,8 +262,8 @@ feed_pipeline(struct neat_streamer *nst)
 		//exit(-1);
 	}
 
-	fprintf(stdout, "%s:%d data level %" G_GUINT64_FORMAT "\n", __func__, __LINE__,
-		gst_app_src_get_current_level_bytes(nst->appsrc));
+//	fprintf(stdout, "%s:%d data level %" G_GUINT64_FORMAT "\n", __func__, __LINE__,
+//		gst_app_src_get_current_level_bytes(nst->appsrc));
 }
 
 // Error handler
@@ -337,8 +340,8 @@ on_writable(struct neat_flow_operations *opCB)
 	GstMapInfo map;
 	static int cnt = 0;
 	struct neat_streamer *nst;
-
 	nst = opCB->userData;
+
 	/* 
 	 * blocks
 	 * I know, stop looking at me like that  
@@ -391,11 +394,26 @@ on_all_written(struct neat_flow_operations *opCB)
 }
 
 static neat_error_code
+on_feedback_query(struct neat_flow_operations *opCB)
+{
+	if(!initiator)
+		return NEAT_OK;
+
+	if(happy) {
+		return NEAT_OK;
+	} else {
+		return NEAT_ERROR_IO;		// TODO unhappy error :P
+	}
+}
+
+static neat_error_code
 on_connected(struct neat_flow_operations *opCB)
 {
     fprintf(stderr, "%s - flow connected\n", __func__);
 
+    struct neat_flow *flow = NULL;
     struct neat_streamer *nst = NULL;
+	struct neat_flow_operations *ops = NULL;
 
     if (config_log_level >= 1) {
         printf("connected\n");
@@ -405,15 +423,21 @@ on_connected(struct neat_flow_operations *opCB)
         fprintf(stderr, "%s()\n", __func__);
     }
 
-    if ((opCB->userData = alloc_neat_streamer()) == NULL) {
+	flow = opCB->flow;
+	ops = calloc(1, sizeof(struct neat_flow_operations));
+
+    if (ops == NULL) {
+        fprintf(stderr, "%s - could not allocate neat_flow_operations\n", __func__);
+        exit(EXIT_FAILURE);
+    }
+	memcpy(ops, opCB, sizeof(struct neat_flow_operations));
+
+    if ((ops->userData = alloc_neat_streamer()) == NULL) {
         fprintf(stderr, "%s - could not allocate neat_streamer\n", __func__);
         exit(EXIT_FAILURE);
     }
 
-    //neat_set_qos(opCB->ctx, opCB->flow, 0x2e);
-    //neat_set_ecn(opCB->ctx, opCB->flow, 0x00);
-
-    nst = opCB->userData;
+    nst = ops->userData;
 	nst->gst_buffer = gst_buffer_new_allocate(NULL, config_buffer_size_max, NULL);
 	gst_buffer_ref(nst->gst_buffer); 	//bump the ref count, docs are not clear if new does this.
 
@@ -422,10 +446,10 @@ on_connected(struct neat_flow_operations *opCB)
 
 		nst->appsink = setupvideosender();
 
-        opCB->on_readable = NULL;
-        opCB->on_writable = on_writable;
-        opCB->on_all_written = NULL;
-        opCB->on_connected = NULL;
+        ops->on_readable = NULL;
+        ops->on_writable = on_writable;
+        ops->on_all_written = NULL;
+        ops->on_connected = NULL;
 	}
 
 	if(displaysink) {
@@ -442,13 +466,19 @@ on_connected(struct neat_flow_operations *opCB)
 		prepare_handle->data = nst;
 		uv_prepare_start(prepare_handle, pump_g_loop);
 
-        opCB->on_readable = on_readable;
-        opCB->on_writable = NULL;
-        opCB->on_all_written = NULL;
-        opCB->on_connected = NULL;
+        ops->on_readable = on_readable;
+        ops->on_writable = NULL;
+        ops->on_all_written = NULL;
+        ops->on_connected = NULL;
     }
 
-    neat_set_operations(opCB->ctx, opCB->flow, opCB);
+	if(duplex) {
+        ops->on_feedback_query = on_feedback_query;
+	}
+
+    neat_set_qos(flow->ctx, flow, 0x2e);
+
+    neat_set_operations(flow->ctx, flow, ops);
     return NEAT_OK;
 }
 
@@ -531,9 +561,9 @@ print_usage()
     printf("\t- v \tlog level 0..3 (%d)\n", config_log_level);
     printf("\t- p \tport (%d)\n", config_port);
     printf("\t- c \tfile (pem cert thing)\n");
-    printf("\t- F \tfire video at [host:port]\n");
     printf("\t- r \t(receive only)\n");
     printf("\t- s \t(send only)\n");
+    printf("\t- d \t(send and recv)\n");
 
 	exit(EXIT_FAILURE);
 }
@@ -580,7 +610,7 @@ main(int argc, char *argv[])
 
 	neat_log_level(NEAT_LOG_OFF);
 
-	while ((arg = getopt(argc, argv, "P:S:v:h:p:c:sr")) != -1) {
+	while ((arg = getopt(argc, argv, "P:S:v:h:p:c:srd")) != -1) {
         switch(arg) {
         case 'P':
 /* TODO: Properties from file
@@ -612,6 +642,7 @@ main(int argc, char *argv[])
             break;
         case 'h':
             target_addr = optarg;
+			initiator = 1;
             break;
         case 'p':
             config_port = atoi(optarg);
@@ -628,17 +659,21 @@ main(int argc, char *argv[])
         case 'r':
 			displaysink = 1;
             break;
+        case 'd':
+			camerasrc = 1;
+			displaysink = 1;
+            break;
         default:
             print_usage();
             goto cleanup;
             break;
         }
     }
+	duplex = 1;
 
-	if(target_addr == NULL) {
-		print_usage();
-	}
-
+	//if(target_addr == NULL && !initiator) {
+		//print_usage();
+	//}
 
     if ((ctx = neat_init_ctx()) == NULL) {
         fprintf(stderr, "%s - error: could not initialize context\n", __func__);
@@ -679,7 +714,7 @@ main(int argc, char *argv[])
     }
 
 	/* MAIN BIT */
-	if(camerasrc) {
+	if(initiator) {
         fprintf(stdout, "%s:%d %s %s:%d\n",
 			__func__, __LINE__, "Connecting to, ", target_addr, config_port);
 		if (neat_open(ctx, main_flow, target_addr, config_port, NULL, 0) != NEAT_OK) {
