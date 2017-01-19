@@ -1,18 +1,23 @@
 #gcc -g -Wall udpbin.c -o udpbin -I/usr/local/include/gstreamer-1.0 -I/usr/local/lib/gstreamer-1.0/include -I/usr/local/include/glib-2.0 -I/usr/local/lib/glib-2.0/include -I/usr/local/include -pthread -L/usr/local/lib -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 -lintl  
 
 #might need this 
-# export LD_LIBRARY_PATH=neat/build:$LD_LIBRARY_PATH  
+# export LD_LIBRARY_PATH=neat-streamer/neat/build:$LD_LIBRARY_PATH  
 
 set -e
 
 echo "compiling"
 /usr/bin/cc  -g -DHAVE_SA_LEN -DHAVE_SIN6_LEN -DHAVE_SIN_LEN -DHAVE_SS_LEN \
 	-DNEAT_LOG -I/usr/local/include -DHAVE_NETINET_SCTP_H \
-	-DHAVE_SCTP_SEND_FAILED_EVENT -DHAVE_SCTP_EVENT_SUBSCRIBE -std=c99 -pedantic \
-	-Wall -Wextra -Werror -Wno-unused-function -Wno-unused-parameter -g \
+	-DHAVE_SCTP_SEND_FAILED_EVENT -DHAVE_SCTP_EVENT_SUBSCRIBE -std=gnu99 -pedantic \
+	-Wall -Wextra -Werror -Wno-unused-function -Wno-unused-parameter \
 	-I/usr/local/lib/gstreamer-1.0/include -I/usr/local/include/glib-2.0 \
+	-I/usr/include/glib-2.0 -I/usr/include/gstreamer-1.0/ \
+	-I/usr/lib/arm-linux-gnueabihf/glib-2.0/include/ \
 	-I/usr/local/lib/glib-2.0/include -I/usr/local/include \
-	-o build/neat-streamer.o  -c neat-streamer.c -I/usr/local/include/gstreamer-1.0
+	-o build/neat-streamer.o  -c neat-streamer.c \
+	-I/usr/local/include/gstreamer-1.0 \
+	-I/usr/include/gstreamer-1.0 -I/usr/include/glib-2.0 \
+	-I/usr/lib/arm-linux-gnueabihf/glib-2.0/include
 
 
 echo "linking"
@@ -26,7 +31,7 @@ if [ "$unamestr" == 'Darwin' ]; then
 		neat/build/libneat.dylib /usr/local/lib/libuv.dylib /usr/local/lib/libldns.dylib \
 		/usr/local/lib/libjansson.dylib \
 		-L/usr/local/lib -Lneat/build/ -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 -lgstapp-1.0 \
-		-Wl,-rpath,neat/build:/usr/local/lib 
+		-Wl,-rpath,/usr/home/tom/code/neat/build:/usr/local/lib 
 elif [ "$unamestr" == 'FreeBSD' ]; then
 	platform='freebsd'
 	echo "FreeBSD"
@@ -36,5 +41,16 @@ elif [ "$unamestr" == 'FreeBSD' ]; then
 		neat/build/libneat.so /usr/local/lib/libuv.so /usr/local/lib/libldns.so \
 		/usr/local/lib/libjansson.so \
 		-L/usr/local/lib -Lneat/build/ -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 -lintl -lgstapp-1.0 \
-		-Wl,-rpath,neat/build:/usr/local/lib 
+		-Wl,-rpath,/usr/home/tom/code/neat/build:/usr/local/lib 
+elif [ "$unamestr" == 'Linux' ]; then
+	platform='linux'
+	echo "Linux - Only works on the PI"
+	/usr/bin/cc -DHAVE_NETINET_SCTP_H -DHAVE_SCTP_SEND_FAILED_EVENT \
+		-DHAVE_SCTP_EVENT_SUBSCRIBE -std=c99 -pedantic -Wall -Wextra -Werror \
+		-Wno-unused-function -Wno-unused-parameter -g build/neat-streamer.o -o neat-streamer \
+		neat/build/libneat.so /usr/local/lib/libuv.so /usr/lib/libldns.so \
+		/usr/lib/arm-linux-gnueabihf/libjansson.so \
+		-L/usr/lib -Lneat/build/ -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 -lgstapp-1.0 \
+		-Wl,-rpath,neat/build:/usr/lib 
 fi
+
