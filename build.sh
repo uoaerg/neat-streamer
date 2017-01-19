@@ -26,7 +26,7 @@ if [ "$unamestr" == 'Darwin' ]; then
 		neat/build/libneat.dylib /usr/local/lib/libuv.dylib /usr/local/lib/libldns.dylib \
 		/usr/local/lib/libjansson.dylib \
 		-L/usr/local/lib -Lneat/build/ -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 -lgstapp-1.0 \
-		-Wl,-rpath,/usr/home/tom/code/neat/build:/usr/local/lib 
+		-Wl,-rpath,neat/build:/usr/local/lib 
 elif [ "$unamestr" == 'FreeBSD' ]; then
 	platform='freebsd'
 	echo "FreeBSD"
@@ -36,5 +36,5 @@ elif [ "$unamestr" == 'FreeBSD' ]; then
 		neat/build/libneat.so /usr/local/lib/libuv.so /usr/local/lib/libldns.so \
 		/usr/local/lib/libjansson.so \
 		-L/usr/local/lib -Lneat/build/ -lgstreamer-1.0 -lgobject-2.0 -lglib-2.0 -lintl -lgstapp-1.0 \
-		-Wl,-rpath,/usr/home/tom/code/neat/build:/usr/local/lib 
+		-Wl,-rpath,neat/build:/usr/local/lib 
 fi
