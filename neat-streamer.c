@@ -30,8 +30,11 @@
 static struct neat_flow_operations ops;
 static struct neat_ctx *ctx = NULL;
 static struct neat_flow *main_flow = NULL;
+static struct neat_flow *proxy_flow = NULL;
 static int want = 0;
 static int connected = 0;
+
+GstElement *global_pipeline;
 
 uv_prepare_t *prepare_handle;
 
@@ -44,7 +47,7 @@ static char *config_property = "{\
     ]\
 }";\
 
-static uint32_t config_port=6969;
+static uint32_t config_port = 6969;
 static uint16_t config_log_level = 0;
 static uint32_t config_buffer_size_max = 1400;
 static char *config_pem_file = NULL;
@@ -54,6 +57,8 @@ static uint8_t displaysink = 0;
 static uint8_t initiator = 0;
 static uint8_t duplex = 0;
 static uint8_t happy = 0;
+
+static GstClockTime basetimestamp = 0;
 
 GstSample *sample;
 
@@ -123,11 +128,18 @@ setupvideosender()
 	gchar *descr;
 	GError *error = NULL;
 	GstStateChangeReturn ret;
-
+/*
 	descr =
 		g_strdup_printf("videotestsrc ! x264enc ! rtph264pay ! "
 		" appsink name=sink caps=\"%s" "\"", gst_caps_to_string(GST_CAPS_ANY));
- 
+*/
+
+	descr =
+		g_strdup_printf(
+		"wrappercamerabinsrc mode=2 ! video/x-raw, width=320, height=240 !"
+		" x264enc ! rtph264pay !"
+		" appsink name=sink caps=\"%s" "\"", gst_caps_to_string(GST_CAPS_ANY));
+
 	pipeline = gst_parse_launch(descr, &error);
 
 	if (error != NULL) {
@@ -170,11 +182,7 @@ setupvideosender()
 void 
 pump_g_loop(uv_prepare_t *handle)
 {
-//	struct neat_streamer *nst = handle->data;
-
-//	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
-//	feed_pipeline(nst->appsrc, nst);
-	g_main_context_iteration(g_main_context_default(),FALSE);
+	g_main_context_iteration(g_main_context_default(), FALSE);
 }
 
 static void 
@@ -183,7 +191,6 @@ cb_need_data(GstElement *appsrc, guint unused_size, gpointer user_data)
     if (config_log_level >= 1) {
 		fprintf(stdout, "%s:%d\n", __func__, __LINE__);
     }
-	//prepare_buffer((GstAppSrc*)appsrc);
 	want++;
 }
 
@@ -191,38 +198,103 @@ GstAppSrc *
 setupvideoreceiver()
 {
 	fprintf(stdout, "%s:%d\n", __func__, __LINE__);
-	GstElement *pipeline, *appsrc,  *rtpdepay, *decodebin, *videosink;
+	GstElement *pipeline, *appsrc;
 
-	/* setup pipeline */
-	pipeline = gst_pipeline_new("pipeline");
-	appsrc = gst_element_factory_make("appsrc", "source");
-	rtpdepay = gst_element_factory_make("rtph264depay", "rtpdepay");
-	decodebin = gst_element_factory_make("decodebin", "decodebin");
-	videosink = gst_element_factory_make("autovideosink", "videosink");
+/*
+* gst-launch-1.0 -v \
+*  udpsrc port=6969 \
+*  ! application/x-rtp \
+*  ! rtph264depay \
+*  ! decodebin \
+*  ! autovideosink
+*/
+	gchar *descr;
+	GError *error = NULL;
 
-	GstCaps *caps = gst_caps_from_string(
-		"application/x-rtp,media=(string)video,"
-		"clock-rate=(int)90000,encoding-name=(string)H264");
-	g_object_set (appsrc, "caps", caps, NULL);
+	descr = g_strdup_printf(
+		//"appsrc name=src is-live=true ! application/x-rtp ! rtph264depay ! decodebin ! autovideosink");
+	//	"appsrc name=src is-live=true "
+		
+		"udpsrc port=6900 "	
+		"! application/x-rtp, media=(string)video, clock-rate=(int)90000,encoding-name=(string)H264"
+		"! rtph264depay "
+		"! decodebin "
+		"! autovideosink");
 
-	gst_bin_add_many(GST_BIN(pipeline), appsrc, rtpdepay, decodebin, videosink, NULL);
-	gst_element_link_many(appsrc, rtpdepay, decodebin, videosink, NULL);
+		//"! videorate "
+		//"! filesink location=file.out");
+ 
+	pipeline = gst_parse_launch(descr, &error);
+
+	if (error != NULL) {
+		g_print ("could not construct pipeline: %s\n", error->message);
+		g_clear_error (&error);
+		exit (-1);
+	}
+
+	appsrc = gst_bin_get_by_name(GST_BIN (pipeline), "src");
 
 	/* setup appsrc */
+	/*
 	g_object_set (G_OBJECT (appsrc),
 		"stream-type", 0, // GST_APP_STREAM_TYPE_STREAM
 		"format", GST_FORMAT_TIME,
 		"is-live", TRUE,
 		NULL);
 	g_signal_connect (appsrc, "need-data", G_CALLBACK (cb_need_data), NULL);
-
+	*/
 	/* play */
 	fprintf(stdout, "%s:%d Setting play on pipeline\n", __func__, __LINE__);
-	gst_element_set_state(pipeline, GST_STATE_PLAYING);
 
-	GST_DEBUG_BIN_TO_DOT_FILE((GstBin *)pipeline, GST_DEBUG_GRAPH_SHOW_ALL, "pipeline");
+	GstStateChangeReturn ret;
+	ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
+
+	switch (ret) {
+	case GST_STATE_CHANGE_FAILURE:
+		g_print ("failed to play the file\n");
+		exit (-1);
+	case GST_STATE_CHANGE_NO_PREROLL:
+		/* for live sources, we need to set the pipeline to PLAYING before we
+		 * can receive a buffer. We don't do that yet */
+		g_print ("live sources not supported yet\n");
+		exit (-1);
+	case GST_STATE_CHANGE_SUCCESS:
+		fprintf(stdout, "%s:%d play, IT WORKED!\n", __func__, __LINE__);
+		break;
+	case GST_STATE_CHANGE_ASYNC :
+		fprintf(stdout, "%s:%d play, async!\n", __func__, __LINE__);
+		break;
+	default:
+		fprintf(stdout, "%s:%d Setting play on pipeline, something \n", __func__, __LINE__);
+		break;
+	}
+
+	global_pipeline = pipeline;
 
 	return (GstAppSrc *)appsrc;
+}
+
+#include <ctype.h>
+#include <stdio.h>
+
+void 
+hexdump(void *ptr, int buflen) 
+{
+  unsigned char *buf = (unsigned char*)ptr;
+  int i, j;
+  for (i=0; i<buflen; i+=16) {
+    printf("%06x: ", i);
+    for (j=0; j<16; j++) 
+      if (i+j < buflen)
+        printf("%02x ", buf[i+j]);
+      else
+        printf("   ");
+    printf(" ");
+    for (j=0; j<16; j++) 
+      if (i+j < buflen)
+        printf("%c", isprint(buf[i+j]) ? buf[i+j] : '.');
+    printf("\n");
+  }
 }
 
 static void
@@ -231,39 +303,83 @@ feed_pipeline(struct neat_streamer *nst)
     if (config_log_level >= 1) {
 		fprintf(stdout, "%s:%d\n", __func__, __LINE__);
     }
-//	fprintf(stdout, "%s:%d data level %" G_GUINT64_FORMAT "\n", __func__, __LINE__,
-//		gst_app_src_get_current_level_bytes(nst->appsrc));
 
-	static GstClockTime timestamp = 0;
 	GstFlowReturn ret;
+	GstElement *element = NULL;
 
 	if(!want) {
 		return;
 	}
-	want = 0;
+
 	if(want > 1) {
 		fprintf(stdout, "%s:%d %d\n", __func__, __LINE__, want);
 	}
+	want = 0;
 
-	GstBuffer *buffer = gst_buffer_new_allocate(NULL, config_buffer_size_max, NULL);
+	GstBuffer *buffer = gst_buffer_new_allocate(NULL, nst->buffer_size, NULL);
 
 	gst_buffer_fill(buffer, 0, nst->buffer, nst->buffer_size);
 
-	GST_BUFFER_PTS(buffer) = timestamp;
-	GST_BUFFER_DURATION(buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 2);
-	timestamp += GST_BUFFER_DURATION(buffer);
+	//GstMapInfo map;
+	//gst_buffer_map (buffer, &map, GST_MAP_READ);
 
-	ret = gst_app_src_push_buffer(nst->appsrc, buffer);
+	//fprintf(stdout, "%s:%d %s%lu\n", __func__, __LINE__, "Buffer Size: ", map.size);
+	//hexdump(map.data, map.size); 
+
+    if (basetimestamp == 0) {
+		/* https://github.com/GStreamer/gst-rtsp-server/blob/fb7833245de53bd6e409f5faf228be7899ce933f/gst/rtsp-server/rtsp-stream.c#L3167
+		 * Take current running_time. This timestamp will be put on the first
+		 * buffer of each stream because we are a live source and so we
+		 * timestamp with the running_time. When we are dealing with TCP, we
+		 * also only timestamp the first buffer (using the DISCONT flag)
+		 * because a server typically bursts data, for which we don't want to
+		 * compensate by speeding up the media. The other timestamps will be
+		 * interpollated from this one using the RTP timestamps. 
+		 */
+		fprintf(stdout, "%s:%d %s\n", __func__, __LINE__, "manually setting time");
+
+		if (nst->appsrc) {
+			element = gst_object_ref(nst->appsrc);
+		} else {
+			fprintf(stdout, "%s:%d %s\n", __func__, __LINE__, "manually setting time: exit");
+			element = NULL;
+			return;
+		}
+
+		GST_OBJECT_LOCK (element);
+		if (GST_ELEMENT_CLOCK (element)) {
+			fprintf(stdout, "%s:%d %s\n", __func__, __LINE__, "manually setting time on pipeline");
+			GstClockTime now;
+			GstClockTime base_time;
+
+			now = gst_clock_get_time (GST_ELEMENT_CLOCK (element));
+			base_time = GST_ELEMENT_CAST (element)->base_time;
+
+			basetimestamp = now - base_time;
+			GST_BUFFER_TIMESTAMP (buffer) = basetimestamp;
+			GST_DEBUG ("stream p: first buffer at time %" GST_TIME_FORMAT
+				", base %" GST_TIME_FORMAT, GST_TIME_ARGS (now),
+				GST_TIME_ARGS (base_time));
+			fprintf(stdout, "first buffer at time %" GST_TIME_FORMAT
+				", base %" GST_TIME_FORMAT "\n", GST_TIME_ARGS (now),
+				GST_TIME_ARGS (base_time));
+		} else {
+
+		}
+			
+
+		GST_OBJECT_UNLOCK (element);
+		gst_object_unref (element);
+		ret = gst_app_src_push_buffer (GST_APP_SRC_CAST (element), buffer);
+	} else {
+		ret = gst_app_src_push_buffer(nst->appsrc, buffer);
+	}
 
 	if (ret != GST_FLOW_OK) {
 		/* something wrong, stop pushing */
         fprintf(stderr, "%s:%d %s\n", __func__, __LINE__, 
 			"Something is broken in gstreamer");
-		//exit(-1);
 	}
-
-//	fprintf(stdout, "%s:%d data level %" G_GUINT64_FORMAT "\n", __func__, __LINE__,
-//		gst_app_src_get_current_level_bytes(nst->appsrc));
 }
 
 // Error handler
@@ -325,10 +441,12 @@ on_readable(struct neat_flow_operations *opCB)
 			return on_error(opCB);
 		}
 	}
-
+/* we might be able to not do this
 	if(want) {
 		feed_pipeline(nst);
 	}
+*/
+	code = neat_write(opCB->ctx, proxy_flow, nst->buffer, nst->buffer_size, NULL, 0);
 
     return NEAT_OK;
 }
@@ -341,6 +459,10 @@ on_writable(struct neat_flow_operations *opCB)
 	static int cnt = 0;
 	struct neat_streamer *nst;
 	nst = opCB->userData;
+
+	if (nst == NULL) {
+		return NEAT_ERROR_OK;
+	}
 
 	/* 
 	 * blocks
@@ -359,13 +481,15 @@ on_writable(struct neat_flow_operations *opCB)
 		}
 
 		buffer = gst_sample_get_buffer (sample);
+		//GstClockTime timestamp = GST_BUFFER_DURATION(buffer);
+		//fprintf(stderr, "%s:%d RTP GST_BUFFER_DURATION SEND: %lu\n", __func__,__LINE__, timestamp);
 
 		/* Mapping a buffer can fail (non-readable) */
 		if (gst_buffer_map (buffer, &map, GST_MAP_READ)) {
 			int code = neat_write(opCB->ctx, opCB->flow, map.data, map.size, NULL, 0);
 
 			if (code != NEAT_OK) {
-				fprintf(stderr, "%s - neat_write - error: %d\n", __func__, (int)code);
+fprintf(stderr, "%s:%d - neat_write - error: %d, size: %lu\n", __func__, __LINE__, (int)code, map.size);
 				gst_buffer_unmap (buffer, &map);
 				gst_sample_unref(sample);
 				exit(EXIT_FAILURE);
@@ -409,7 +533,6 @@ on_feedback_query(struct neat_flow_operations *opCB)
 static neat_error_code
 on_connected(struct neat_flow_operations *opCB)
 {
-    fprintf(stderr, "%s - flow connected\n", __func__);
 
     struct neat_flow *flow = NULL;
     struct neat_streamer *nst = NULL;
@@ -424,6 +547,13 @@ on_connected(struct neat_flow_operations *opCB)
     }
 
 	flow = opCB->flow;
+
+    fprintf(stderr, "%s - flow connected, port: %d\n", __func__, flow->port);
+	if (flow->port == 6901 || flow->port == 6900) {
+		fprintf(stderr, "%s - exiting %d\n", __func__, flow->port);
+		return NEAT_ERROR_OK;
+	}
+
 	ops = calloc(1, sizeof(struct neat_flow_operations));
 
     if (ops == NULL) {
@@ -605,6 +735,12 @@ main(int argc, char *argv[])
 	int result;
 	int arg;
 
+	srandom(time(NULL));
+
+	int display_port = random() % 20000 + 5000;
+	display_port = 6900;
+	//int feed_port;
+
     result = EXIT_SUCCESS;
 	gst_init (&argc, &argv);
 
@@ -655,6 +791,7 @@ main(int argc, char *argv[])
              break;
         case 's':
 			camerasrc = 1;
+			display_port++;
             break;
         case 'r':
 			displaysink = 1;
@@ -691,7 +828,21 @@ main(int argc, char *argv[])
 
     // set properties
     if (neat_set_property(ctx, main_flow, arg_property ? arg_property : config_property)) {
-        fprintf(stderr, "%s - error: neat_set_property\n", __func__);
+        fprintf(stderr, "%s:%d - error: neat_set_property\n", __func__, __LINE__);
+        result = EXIT_FAILURE;
+        goto cleanup;
+    }
+
+    // new neat flow
+    if ((proxy_flow = neat_new_flow(ctx)) == NULL) {
+        fprintf(stderr, "%s - error: could not create new neat proxy flow\n", __func__);
+        result = EXIT_FAILURE;
+        goto cleanup;
+    }
+
+    // set properties
+    if (neat_set_property(ctx, proxy_flow, arg_property ? arg_property : config_property)) {
+        fprintf(stderr, "%s:%d - error: neat_set_property\n", __func__, __LINE__);
         result = EXIT_FAILURE;
         goto cleanup;
     }
@@ -713,11 +864,34 @@ main(int argc, char *argv[])
         goto cleanup;
     }
 
+    ops.on_connected = on_connected;
+	//ops.on_writable = on_writable;	//accept flow will never be writable
+    //ops.on_error = on_error;
+    //ops.on_close = on_close;
+    //ops.on_aborted = on_abort;
+    //ops.on_network_status_changed = on_network_changed;
+    //ops.on_timeout = on_timeout;
+
+    if (neat_set_operations(ctx, proxy_flow, &ops)) {
+        fprintf(stderr, "%s - error: neat_set_operations\n", __func__);
+        result = EXIT_FAILURE;
+        goto cleanup;
+    }
+
+	fprintf(stdout, "%s:%d %s %s:%d\n",
+		__func__, __LINE__, "Opening proxy flow to, ", "127.0.0.1", display_port);
+
+	if (neat_open(ctx, proxy_flow, "127.0.0.1", display_port, NULL, 0) != NEAT_OK) {
+		fprintf(stderr, "%s - error: neat_open\n", __func__);
+		result = EXIT_FAILURE;
+		goto cleanup;
+	}
+
 	/* MAIN BIT */
 	if(initiator) {
         fprintf(stdout, "%s:%d %s %s:%d\n",
 			__func__, __LINE__, "Connecting to, ", target_addr, config_port);
-		if (neat_open(ctx, main_flow, target_addr, config_port, NULL, 0) != NEAT_OK) {
+		if (neat_open(ctx, main_flow, target_addr, 6969, NULL, 0) != NEAT_OK) {
 			fprintf(stderr, "%s - error: neat_open\n", __func__);
 			result = EXIT_FAILURE;
 			goto cleanup;
