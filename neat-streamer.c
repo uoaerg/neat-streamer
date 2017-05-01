@@ -481,15 +481,12 @@ on_writable(struct neat_flow_operations *opCB)
 		}
 
 		buffer = gst_sample_get_buffer (sample);
-		//GstClockTime timestamp = GST_BUFFER_DURATION(buffer);
-		//fprintf(stderr, "%s:%d RTP GST_BUFFER_DURATION SEND: %lu\n", __func__,__LINE__, timestamp);
 
 		/* Mapping a buffer can fail (non-readable) */
 		if (gst_buffer_map (buffer, &map, GST_MAP_READ)) {
 			int code = neat_write(opCB->ctx, opCB->flow, map.data, map.size, NULL, 0);
 
 			if (code != NEAT_OK) {
-//fprintf(stderr, "%s:%d - neat_write - error: %d, size: %lu\n", __func__, __LINE__, (int)code, map.size);
 				gst_buffer_unmap (buffer, &map);
 				gst_sample_unref(sample);
 				exit(EXIT_FAILURE);
@@ -576,9 +573,9 @@ on_connected(struct neat_flow_operations *opCB)
 
 		nst->appsink = setupvideosender();
 
-        ops->on_readable = NULL;
+       // ops->on_readable = NULL;
         ops->on_writable = on_writable;
-        ops->on_all_written = NULL;
+        //ops->on_all_written = NULL;
         ops->on_connected = NULL;
 	}
 
@@ -597,8 +594,8 @@ on_connected(struct neat_flow_operations *opCB)
 		uv_prepare_start(prepare_handle, pump_g_loop);
 
         ops->on_readable = on_readable;
-        ops->on_writable = NULL;
-        ops->on_all_written = NULL;
+        //ops->on_writable = NULL;
+        //ops->on_all_written = NULL;
         ops->on_connected = NULL;
     }
 
