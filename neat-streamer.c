@@ -489,7 +489,7 @@ on_writable(struct neat_flow_operations *opCB)
 			int code = neat_write(opCB->ctx, opCB->flow, map.data, map.size, NULL, 0);
 
 			if (code != NEAT_OK) {
-fprintf(stderr, "%s:%d - neat_write - error: %d, size: %lu\n", __func__, __LINE__, (int)code, map.size);
+//fprintf(stderr, "%s:%d - neat_write - error: %d, size: %lu\n", __func__, __LINE__, (int)code, map.size);
 				gst_buffer_unmap (buffer, &map);
 				gst_sample_unref(sample);
 				exit(EXIT_FAILURE);
