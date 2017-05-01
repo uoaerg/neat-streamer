@@ -445,7 +445,8 @@ on_readable(struct neat_flow_operations *opCB)
 	if(want) {
 		feed_pipeline(nst);
 	}
-*/
+*/	
+	happy = 1;
 	code = neat_write(opCB->ctx, proxy_flow, nst->buffer, nst->buffer_size, NULL, 0);
 
     return NEAT_OK;
@@ -521,6 +522,7 @@ on_feedback_query(struct neat_flow_operations *opCB)
 		return NEAT_OK;
 
 	if(happy) {
+		happy = 0;
 		return NEAT_OK;
 	} else {
 		return NEAT_ERROR_IO;		// TODO unhappy error :P
