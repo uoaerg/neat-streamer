@@ -134,11 +134,21 @@ setupvideosender()
 		" appsink name=sink caps=\"%s" "\"", gst_caps_to_string(GST_CAPS_ANY));
 */
 
+#ifdef #STOOPIDLINUX
+	descr =
+		g_strdup_printf(
+		"udpsrc port=6101 "
+			"! video/x-raw, width=320, height=240 "
+			"! x264enc "
+			"! rtph264pay "
+			"! appsink name=sink caps=\"%s" "\"", gst_caps_to_string(GST_CAPS_ANY));
+#else
 	descr =
 		g_strdup_printf(
 		"wrappercamerabinsrc mode=2 ! video/x-raw, width=320, height=240 !"
 		" x264enc ! rtph264pay !"
 		" appsink name=sink caps=\"%s" "\"", gst_caps_to_string(GST_CAPS_ANY));
+#endif
 
 	pipeline = gst_parse_launch(descr, &error);
 
