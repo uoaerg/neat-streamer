@@ -134,7 +134,7 @@ setupvideosender()
 		" appsink name=sink caps=\"%s" "\"", gst_caps_to_string(GST_CAPS_ANY));
 */
 
-#ifdef #STOOPIDLINUX
+#ifdef STOOPIDLINUX
 	descr =
 		g_strdup_printf(
 		"udpsrc port=6101 "
