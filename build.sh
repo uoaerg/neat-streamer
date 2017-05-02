@@ -24,7 +24,7 @@ if [ "$unamestr" == 'Linux' ]; then
 		-I/usr/lib/arm-linux-gnueabihf/glib-2.0/include
 else
 	/usr/bin/cc  -g -DHAVE_SA_LEN -DHAVE_SIN6_LEN -DHAVE_SIN_LEN -DHAVE_SS_LEN \
-		-DNEAT_LOG -DSTOOPIDLINUX -I/usr/local/include -DHAVE_NETINET_SCTP_H \
+		-DNEAT_LOG -I/usr/local/include -DHAVE_NETINET_SCTP_H \
 		-DHAVE_SCTP_SEND_FAILED_EVENT -DHAVE_SCTP_EVENT_SUBSCRIBE -std=gnu99 -pedantic \
 		-Wall -Wextra -Werror -Wno-unused-function -Wno-unused-parameter \
 		-I/usr/local/lib/gstreamer-1.0/include -I/usr/local/include/glib-2.0 \
