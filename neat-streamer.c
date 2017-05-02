@@ -183,7 +183,7 @@ setupvideosender()
 	ret = gst_element_get_state(pipeline, NULL, NULL, 5 * GST_SECOND);
 	if (ret == GST_STATE_CHANGE_FAILURE) {
 		g_print("failed to play source\n");
-		exit(-1);
+		//exit(-1);
 	}
 
 	return (GstAppSink *)appsink;
