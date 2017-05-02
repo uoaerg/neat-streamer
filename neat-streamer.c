@@ -135,6 +135,7 @@ setupvideosender()
 */
 
 #ifdef STOOPIDLINUX
+/*
 	descr =
 		g_strdup_printf(
 		"udpsrc port=6101 "
@@ -142,6 +143,10 @@ setupvideosender()
 			"! x264enc "
 			"! rtph264pay "
 			"! appsink name=sink caps=\"%s" "\"", gst_caps_to_string(GST_CAPS_ANY));
+*/
+	descr =
+		g_strdup_printf("videotestsrc ! x264enc ! rtph264pay ! "
+		" appsink name=sink caps=\"%s" "\"", gst_caps_to_string(GST_CAPS_ANY));
 #else
 	descr =
 		g_strdup_printf(
